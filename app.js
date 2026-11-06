@@ -17,6 +17,7 @@
   let editingPast = false;
   let renderPending = false;
   let toastTimer = null;
+  let refreshSummary = null;
 
   // ---------- Hilfen ----------
 
@@ -33,6 +34,12 @@
     children.flat().forEach((child) => {
       if (child !== null && child !== undefined && child !== false) el.append(child);
     });
+    return el;
+  }
+
+  function svg(tag, attrs) {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    Object.entries(attrs || {}).forEach(([key, value]) => el.setAttribute(key, value));
     return el;
   }
 
@@ -108,16 +115,124 @@
 
   function updateSummary(key) {
     const box = viewEl.querySelector('[data-summary]');
-    if (box) box.replaceWith(summaryCard(key));
+    if (box && refreshSummary) refreshSummary(key);
+  }
+
+  function isComplete(week) {
+    const { achieved, total } = Logic.weekStats(week);
+    return total > 0 && achieved === total;
+  }
+
+  // Wochen mit 100 % in Folge. Wird nur berechnet und nie gespeichert.
+  // Die laufende Woche verlängert die Serie, unterbricht sie aber nie.
+  function weekStreak() {
+    const current = Logic.currentKey();
+    let count = state.weeks[current] && isComplete(state.weeks[current]) ? 1 : 0;
+    let key = Logic.shiftWeek(current, -1);
+    while (state.weeks[key] && isComplete(state.weeks[key])) {
+      count += 1;
+      key = Logic.shiftWeek(key, -1);
+    }
+    return count;
+  }
+
+  function streakRow() {
+    const marks = h('span', { class: 'streak-marks', 'aria-hidden': 'true' });
+    const label = h('span');
+    const update = () => {
+      const count = weekStreak();
+      marks.replaceChildren(...Array.from({ length: Math.min(count, 8) }, () => h('i')));
+      if (count === 0) label.textContent = 'Noch keine Wochen-Serie';
+      else label.textContent = count === 1 ? '1 Woche in Serie' : `${count} Wochen in Serie`;
+    };
+    update();
+    return { el: h('p', { class: 'streak' }, marks, label), update };
+  }
+
+  // Die Laufbahn: Der Fortschritt läuft ab der Ziellinie oben einmal rundherum.
+  function progressTrack() {
+    const shape = 'M160 14 H235 A71 71 0 0 1 235 156 H85 A71 71 0 0 1 85 14 H160 Z';
+    const progress = svg('path', { d: shape, pathLength: 100, class: 'track-prog' });
+    const drawing = svg('svg', { viewBox: '0 0 320 170', class: 'track', 'aria-hidden': 'true' });
+    drawing.append(
+      svg('path', { d: shape, class: 'track-lane' }),
+      progress,
+      svg('rect', { x: 158, y: 0, width: 4, height: 28, class: 'track-finish' }));
+    return { drawing, progress };
   }
 
   function summaryCard(key) {
-    const { achieved, total, percent } = Logic.weekStats(state.weeks[key]);
-    const fill = h('span');
-    fill.style.width = `${percent}%`;
-    return h('section', { class: 'summary', 'data-summary': true },
-      h('p', { class: 'summary-text' }, `KW ${Logic.weekNumber(key)}: ${achieved} von ${total} erreicht (${percent} %)`),
-      h('div', { class: 'bar', role: 'presentation' }, fill));
+    const { drawing, progress } = progressTrack();
+    const pct = h('span', { class: 'pct' });
+    const text = h('p', { class: 'summary-text' });
+    const streak = key === Logic.currentKey() ? streakRow() : null;
+    const box = h('section', { class: 'summary', 'data-summary': true },
+      h('div', { class: 'track-wrap' }, drawing, h('div', { class: 'infield' }, pct, text)),
+      streak && streak.el);
+    refreshSummary = () => {
+      const week = state.weeks[key];
+      if (!week) return;
+      const { achieved, total, percent } = Logic.weekStats(week);
+      pct.replaceChildren(String(percent), h('small', null, '%'));
+      text.textContent = isComplete(week) ? 'Alle Ziele erreicht' : `${achieved} von ${total} erreicht`;
+      progress.style.strokeDasharray = `${percent} 100`;
+      if (streak) streak.update();
+    };
+    refreshSummary();
+    return box;
+  }
+
+  // Konfetti bei 100 %. Fällt weg, wenn am Gerät „Bewegung reduzieren“ eingestellt ist.
+  function celebrate() {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const canvas = h('canvas', { class: 'confetti', 'aria-hidden': 'true' });
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const scale = window.devicePixelRatio || 1;
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    document.body.append(canvas);
+    const ctx = canvas.getContext('2d');
+    ctx.scale(scale, scale);
+    const colors = ['#ffe500', '#ffffff', '#0b3bd9', '#ffe500', '#d63a00'];
+    const parts = Array.from({ length: 120 }, (_, i) => {
+      const left = i % 2 === 0;
+      const angle = (left ? -1 : -2.14) + (Math.random() - 0.5) * 0.7;
+      const speed = 8 + Math.random() * 10;
+      return {
+        x: left ? 0 : width,
+        y: height * 0.72,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        size: 5 + Math.random() * 6,
+        rot: Math.random() * 6,
+        spin: (Math.random() - 0.5) * 0.4,
+        color: colors[i % colors.length],
+      };
+    });
+    const start = performance.now();
+    const duration = 2800;
+    function frame(time) {
+      const age = time - start;
+      if (age >= duration) { canvas.remove(); return; }
+      ctx.clearRect(0, 0, width, height);
+      ctx.globalAlpha = Math.max(0, Math.min(1, (duration - age) / 700));
+      parts.forEach((p) => {
+        p.vy += 0.2;
+        p.vx *= 0.99;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.rot += p.spin;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+        ctx.restore();
+      });
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
   }
 
   function weekNav(key) {
@@ -170,8 +285,10 @@
           type: 'checkbox',
           checked: item.achieved,
           onchange: (e) => {
+            const wasComplete = isComplete(state.weeks[key]);
             card.classList.toggle('is-achieved', e.target.checked);
             setItem(key, item.id, { achieved: e.target.checked });
+            if (!wasComplete && isComplete(state.weeks[key])) celebrate();
           },
         }),
         h('span', null, 'Ziel erreicht')));
@@ -192,7 +309,7 @@
     const current = Logic.currentKey();
     const isCurrent = key === current;
     const week = state.weeks[key];
-    const nodes = [weekNav(key)];
+    const nodes = [h('section', { class: 'hero' }, weekNav(key), week && summaryCard(key))];
 
     if (!week) {
       nodes.push(h('section', { class: 'empty' },
@@ -209,7 +326,6 @@
         }, 'Woche nachtragen')));
     } else {
       const editable = isCurrent || editingPast;
-      nodes.push(summaryCard(key));
       if (!isCurrent) {
         nodes.push(h('div', { class: 'row' },
           h('span', { class: 'badge' }, 'Abgerechnet'),
@@ -245,6 +361,47 @@
     window.scrollTo(0, 0);
   }
 
+  function yearChart(year) {
+    const count = Logic.weeksInYear(year);
+    const current = Logic.currentKey();
+    const keyOf = (week) => `${year}-W${String(week).padStart(2, '0')}`;
+    const read = h('p', { class: 'year-read', 'aria-live': 'polite' });
+    const bars = h('div', { class: 'year-bars' });
+    const buttons = new Map();
+    const select = (week) => {
+      const stats = Logic.weekStats(state.weeks[keyOf(week)]);
+      read.textContent = `KW ${week}: ${stats.achieved} von ${stats.total} erreicht (${stats.percent} %)`;
+      buttons.forEach((button, number) => button.classList.toggle('is-selected', number === week));
+    };
+    let lastWeek = null;
+    for (let week = 1; week <= count; week += 1) {
+      const entry = state.weeks[keyOf(week)];
+      const fill = h('span');
+      if (entry) {
+        const stats = Logic.weekStats(entry);
+        fill.style.height = `${Math.max(stats.percent, 2)}%`;
+        lastWeek = week;
+      }
+      const button = h('button', {
+        type: 'button',
+        class: `year-bar${keyOf(week) === current ? ' is-now' : ''}`,
+        'aria-label': entry ? `KW ${week}: ${Logic.weekStats(entry).percent} Prozent` : `KW ${week}: keine Einträge`,
+        disabled: !entry,
+        onclick: () => select(week),
+      }, fill);
+      buttons.set(week, button);
+      bars.append(button);
+    }
+    if (lastWeek) select(lastWeek);
+    const axis = h('div', { class: 'year-axis', 'aria-hidden': 'true' });
+    [1, 13, 26, 39, count].forEach((week) => {
+      const label = h('span', null, `KW ${week}`);
+      label.style.left = week === 1 ? '0' : (week === count ? '100%' : `${((week - 0.5) / count) * 100}%`);
+      axis.append(label);
+    });
+    return h('section', { class: 'panel' }, bars, axis, read);
+  }
+
   function renderHistory() {
     const keys = Logic.listWeekKeys(state);
     const nodes = [h('div', { class: 'row actions' },
@@ -255,6 +412,7 @@
       if (weekYear !== year) {
         year = weekYear;
         nodes.push(h('h2', { class: 'category' }, String(year)));
+        nodes.push(yearChart(year));
       }
       const { achieved, total, percent } = Logic.weekStats(state.weeks[key]);
       const fill = h('span');
