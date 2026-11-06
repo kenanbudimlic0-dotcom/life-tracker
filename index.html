@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="de-AT">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; manifest-src 'self'; connect-src 'self' https://api.github.com; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#f5f4ef" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#141715" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Life Tracker">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>Life Tracker</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1 id="title">Woche</h1>
+    <button id="status" class="status" type="button"></button>
+  </header>
+  <main id="view"></main>
+  <nav class="tabs" aria-label="Bereiche">
+    <button type="button" data-tab="week">Woche</button>
+    <button type="button" data-tab="history">Verlauf</button>
+    <button type="button" data-tab="checklist">Checkliste</button>
+  </nav>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="logic.js" defer></script>
+  <script src="sync.js" defer></script>
+  <script src="app.js" defer></script>
+</body>
+</html>
